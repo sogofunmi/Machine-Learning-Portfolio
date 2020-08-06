@@ -1,1 +1,1 @@
-# data-science-and-machine-learning-portfolio
+# Data Science and Machine Learning Portfolio
