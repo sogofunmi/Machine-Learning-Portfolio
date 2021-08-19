@@ -1,6 +1,6 @@
-# Data Science and Machine Learning Portfolio
+# [Data Science and Machine Learning Portfolio](https://github.com/sogofunmi/data-science-and-machine-learning-portfolio/blob/master/Image%20Caption%20Generator.ipynb)
 
-This is a collection of data science and machine learning projects I completed for self-learning purposes. Presented in the form of iPython Notebooks
+This is a collection of data science and machine learning projects I completed for self-learning purposes. Presented in the form of iPython Notebooks.
 ## Contents
   - ### Machine Learning
       - Walmart Sales Forecasting: A model to predict the sales of all Walmart stores using various statistical analytic methods. Identified the weekly sales of Walmart stores.
