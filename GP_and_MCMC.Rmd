@@ -1,0 +1,326 @@
+---
+author: "Olorunsogofunmi Ogunwale"
+date: "2024-05-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r lib}
+
+library(readxl)
+library(mvtnorm)
+library(MASS)
+library(rstan)
+library(coda)
+
+```
+
+```{r 1}
+data <- read.csv("data.csv")
+
+X <- subset(data, select = -c(id,diagnosis) )
+
+y <- subset(data, select = c(diagnosis) )
+
+y <- ifelse(y == "M", 1, 0)
+
+set.seed(123)
+
+sample <- sample(c(TRUE, FALSE), nrow(data), replace=TRUE, prob=c(0.7,0.3))
+X_train  <- X[sample, ]
+X_test  <- X[!sample, ]
+
+y_train <- y[sample,]
+y_test <- y[!sample,]
+
+X_train <- scale(X_train)
+X_test <- scale(X_test)
+
+```
+
+
+## STANDARD GP CLASSIFIER
+
+```{r 78}
+
+kernel_se <- function(x1, x2, lengthscale) {
+    
+    return( exp(-0.5 * sum((x1 - x2)^2)  / lengthscale^2))
+  
+}
+
+
+kernel_mat <- function(X, l) {
+  n_test <- nrow(X)
+  K_star_star <- matrix(0, n_test, n_test)
+  for (i in 1:n_test) {
+    for (j in 1:n_test) {
+      K_star_star[i, j] <- kernel_se(X_test[i,], X_test[j,], l)
+    }
+  }
+  return(K_star_star)
+}
+
+train_gp <- function(X_train, y_train, l) {
+  n <- nrow(X_train)
+  K <- matrix(0, n, n)
+  for (i in 1:n) {
+    for (j in 1:n) {
+      K[i, j] <- kernel_se(X_train[i,], X_train[j,], l)
+    }
+  }
+  
+  L <- chol(K)  
+  
+  alpha <- solve(L, solve(t(L), y_train))  
+  return(list(alpha = alpha, L = L))
+}
+
+
+predict_gp <- function(X_train, y_train, X_test, sigma, alpha, L) {
+  n_train <- nrow(X_train)
+  n_test <- nrow(X_test)
+  K_star <- matrix(0, n_test, n_train)
+  for (i in 1:n_test) {
+    for (j in 1:n_train) {
+      K_star[i, j] <- kernel_se(X_test[i,], X_train[j,], sigma)
+    }
+  }
+  
+  print(dim(K_star))
+  f_mean <- K_star %*% alpha
+  v <- K_star %*% L
+  
+  f_var <- kernel_mat(X_test, sigma) - (v %*% t(v))
+  
+
+  return(f_mean)
+}
+
+
+```
+
+
+
+```{r 6}
+
+logistic <- function(z) {
+  return(1 / (1 + exp(-z)))
+}
+
+estim <- function(X_train, y_train, X_test, sigma, alpha, L) {
+  predictions <- predict_gp(X_train, y_train, X_test, sigma, gp_model$alpha, gp_model$L)
+  preds <- as.numeric(preds)
+  probs <- logistic(preds)
+  log_likelihood <- sum(ifelse(y_train == 0, log(1 - probs), log(probs)))
+  return(log_likelihood)
+}
+
+
+metro <- function(X_train, y_train, X_test, param, n_iter) {
+  
+  theta <- param
+  accepted_samples <- matrix(nrow = n_iter, ncol = 1)
+  accepted_samples[1, ] <- theta
+  model <- train_gp(X, y, theta)
+  current_log_likelihood <- estim(X_train, y_train, X_test, sigma, model$alpha, model$L)
+
+  for (i in 1:n_iter) {
+    
+    proposed_theta <- theta + rlnorm(1, 0, 1)
+
+    
+    proposed_model <- train_gp(X, y, proposed_theta)
+
+    
+    proposed_log_likelihood <- estim(X_train, y_train, X_test, sigma, proposed_model$alpha, proposed_model$L)
+
+    
+    acceptance_ratio <- exp(proposed_log_likelihood - current_log_likelihood)
+
+    
+    if (runif(1) < acceptance_ratio || acceptance_ratio >= 1) {
+      theta <- proposed_theta
+      accepted_samples[i, ] <- theta
+      model <- proposed_model
+      current_log_likelihood <- proposed_log_likelihood
+    } else {
+      accepted_samples[i, ] <- accepted_samples[i - 1, ]
+    }
+  }
+
+  return(accepted_samples)
+}
+
+
+initial_theta <- 1
+
+samples <- metro(X_train, y_train, X_test, initial_theta, 3)
+
+
+print("Accepted samples:")
+print(samples)
+
+```
+
+```{r 5}
+
+preds <- ifelse(predictions > 0, 1, 0)
+accuracy <- sum(y_test == preds) / length(y_test)
+
+
+accuracy
+
+```
+
+```{r 56}
+
+
+gp_model <- train_gp(X_train, y_train, 0.8)
+
+
+predictions <- predict_gp(X_train, y_train, X_test, sigma, gp_model$alpha, gp_model$L)
+
+preds <- ifelse(predictions > 0, 1, 0)
+accuracy <- sum(y_test == preds) / length(y_test)
+
+
+accuracy
+
+```
+
+
+
+```{r 89}
+
+library(boot)
+
+log_hyperprior <- function(theta) {
+  alpha <- theta[1]
+  beta <- theta[2]
+  
+  hyperprior <- alpha * beta * (alpha + beta)^(-5/2)
+  return(hyperprior)
+}
+
+
+
+
+log_likelihood <- function(theta, x, y) {
+  x <- as.matrix(x)
+  y <- as.numeric(y)
+  alpha <- theta[1]
+  beta <- theta[2]
+  p <- inv.logit(alpha + beta * x)
+  likelihood <- rep(0, nrow(x))
+  
+  likelihood <- matrix(0, nrow = nrow(x), ncol = ncol(x))
+  for (i in 1:nrow(x)) {
+    for (j in 1:ncol(x)) 
+      
+      p_ij <- inv.logit(alpha + beta * x[i, j])
+    
+    
+      likelihood[i, j] <- dbinom(y[i], size = 1, prob = p_ij, log = TRUE)
+  }
+  
+  sum_like <- sum(likelihood)
+  
+  return(sum_like)
+}
+
+log_posterior <- function(theta, x, y) {
+  log_likelihood <- log_likelihood(theta, x, y)
+  
+  log_hyperprior<- (theta)
+  
+  log_posterior <- sum(log_likelihood + log_hyperprior)
+  
+  return(log_posterior)
+}
+
+
+metropolis_hastings <- function(log_posterior, data, initial_values, proposal_sd, n_iterations, prior_mean, prior_variance) {
+  n_params <- length(initial_values)
+  chain <- matrix(0, nrow = n_iterations, ncol = n_params)
+  chain[1, ] <- initial_values
+  
+  for (i in 2:n_iterations) {
+    proposed_value <- chain[i - 1, ] + rnorm(n_params, 0, proposal_sd)
+    
+    
+    log_alpha <- log_posterior(proposed_value, data, prior_mean, prior_variance) - log_posterior(chain[i - 1, ], data, prior_mean, prior_variance)
+    
+    if (log(runif(1)) < log_alpha) {
+      chain[i, ] <- proposed_value
+    } else {
+      chain[i, ] <- chain[i - 1, ]
+    }
+  }
+  
+  return(chain)
+}
+
+metro <- function(X, y, chains, params, n_iter) {
+  
+  
+  sims <- array(NA, c(n_iter, chains, 2))
+  dimnames(sims) <- list(NULL, NULL,c('alpha', 'beta'))
+  for (j in 1:chains) {
+    alpha <- params[1]
+    beta <- params[2]
+    
+    #p <- params[1:20]
+    sims[1, j, ] <- c(alpha, beta)
+    current_log_likelihood <- log_posterior(params, X, y)
+    for (i in 2:n_iter) {
+      
+      prop_alpha <- alpha + rnorm(1, 0,1)
+      prop_beta <- beta + rbeta(1, 0,1)
+      
+      prop_param = c(prop_alpha, prop_beta)
+      
+      proposed_log_likelihood <- log_posterior(prop_param, X, y)
+      
+      
+      acceptance_ratio <- min(exp(proposed_log_likelihood - current_log_likelihood),1)
+      
+      
+      if (runif(1) < acceptance_ratio) {
+        params <- prop_param
+        
+        
+        alpha <- params[1]
+        beta <- params[2]
+        
+        
+        sims[i, j, ] <- c(alpha, beta)
+        
+        current_log_likelihood <- proposed_log_likelihood
+      } 
+      else {
+        sims[i, j,] <- sims[i - 1, j,]
+      }
+    
+    }
+  }
+  monitor(sims)
+  return(sims)
+}
+
+
+
+
+chain <- metro(X, y, chains=4, params = c(0.9, 0.1), n_iter = 500)
+
+
+
+
+
+
+```
+
+
