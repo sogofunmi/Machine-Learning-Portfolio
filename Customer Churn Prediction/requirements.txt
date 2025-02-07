@@ -1,0 +1,10 @@
+seaborn
+numpy
+pandas
+mlflow
+flask
+waitress
+matplotlib
+scikit-learn
+xgboost
+optuna
